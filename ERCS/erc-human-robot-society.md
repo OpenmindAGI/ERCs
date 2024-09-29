@@ -115,8 +115,6 @@ interface IUniversalCharter {
 
 ## Rationale
 
-```solidity
-
 IUniversalIdentity
 
 addRule(bytes memory rule):
@@ -153,8 +151,6 @@ This function allows for the permanent shutdown of the contract, preventing any 
 
 Events (UserRegistered, UserLeft, ComplianceChecked, RuleSetUpdated, ContractTerminated):
 These events collectively ensure that key activities are visible to off-chain systems and participants, making the system auditable and transparent.
-
-```
 
 ## Backwards Compatibility
 
