@@ -170,6 +170,7 @@ No backward compatibility issues found.
 pragma solidity ^0.8.19;
 
 import "./IUniversalIdentity.sol";
+import "./IUniversalCharter.sol";
 
 /// we can use owner to replace onlyTrustedUpdater
 
@@ -181,8 +182,15 @@ contract UniversalIdentity is IUniversalIdentity {
     // Mapping to store the off-chain compliance status for each rule
     mapping(bytes => bool) private complianceStatus;
 
+    // Track the charters the robot is subscribed to
+    mapping(address => bool) public subscribedCharters;
+
     // Address of the trusted external system or oracle that will update compliance
     address public trustedComplianceUpdater;
+
+    // Event for subscribing/unsubscribing to charters
+    event SubscribedToCharter(address indexed charter);
+    event UnsubscribedFromCharter(address indexed charter);
 
     // Event for updating the compliance updater
     event TrustedComplianceUpdaterChanged(address indexed oldUpdater, address indexed newUpdater);
@@ -191,6 +199,8 @@ contract UniversalIdentity is IUniversalIdentity {
     error RuleNotAgreed(bytes rule);
     error RuleNotCompliant(bytes rule);
     error RuleAlreadyAdded(bytes rule);
+    error NotSubscribedToCharter(address charter);
+
 
     // Modifier to restrict updates to the trusted external system
     modifier onlyTrustedUpdater() {
@@ -275,6 +285,35 @@ contract UniversalIdentity is IUniversalIdentity {
         }
 
         return true;
+    }
+
+    /// @notice Subscribe and register to a specific UniversalCharter contract using its stored rule set
+    /// @param charter The address of the UniversalCharter contract
+    /// @param version The version of the rule set to fetch and register for
+    function subscribeAndRegisterToCharter(address charter, uint256 version) external {
+        require(!subscribedCharters[charter], "Already subscribed to this charter");
+        subscribedCharters[charter] = true;
+        emit SubscribedToCharter(charter);
+
+        // Fetch the rule set directly from the UniversalCharter contract using the public getter
+        bytes[] memory ruleSet = IUniversalCharter(charter).ruleSets(version);
+
+        // Register as a robot in the charter using the fetched rule set
+        IUniversalCharter(charter).registerUser(address(this), IUniversalCharter.UserType.Robot, ruleSet);
+    }
+
+
+    /// @notice Leave the system for a specific UniversalCharter contract
+    /// @param charter The address of the UniversalCharter contract to leave
+    function leaveCharter(address charter) external {
+        require(subscribedCharters[charter], "Not subscribed to this charter");
+
+        // Call the leaveSystem function of the UniversalCharter contract
+        IUniversalCharter(charter).leaveSystem();
+
+        // Unsubscribe from the charter after leaving
+        subscribedCharters[charter] = false;
+        emit UnsubscribedFromCharter(charter);
     }
 
     /// @dev Event to emit when compliance is checked
