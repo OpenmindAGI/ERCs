@@ -57,6 +57,12 @@ interface IUniversalIdentity {
 
     /// @dev Emitted when a rule is removed from the robot's identity.
     event RuleRemoved(bytes rule);
+    
+    /// @dev Emitted when a charter is subscribed to.
+    event SubscribedToCharter(address indexed charter);
+
+    /// @dev Emitted when it is unsubscribed from a charter.
+    event UnsubscribedFromCharter(address indexed charter);
 }
 
 interface IUniversalCharter {
@@ -65,12 +71,11 @@ interface IUniversalCharter {
     enum UserType { Human, Robot }
 
     /// @notice Registers a user (human or robot) to join the system by agreeing to a rule set.
-    /// @param user Address of the user (either human or robot) joining the system.
     /// @param userType The type of user.
     /// @param ruleSet The array of individual rules the user agrees to follow. 
     /// @dev This function MUST be implemented by contracts using this interface.
     /// @dev The implementing contract MUST ensure that the user complies with the specified rule set before registering them in the system by invoking `checkCompliance`.
-    function registerUser(address user, UserType userType, bytes[] memory ruleSet) external;
+    function registerUser(UserType userType, bytes[] memory ruleSet) external;
 
     /// @notice Allows a user (human or robot) to leave the system 
     /// @dev This function MUST be callable only by the user themselves (via `msg.sender`). 
@@ -106,9 +111,6 @@ interface IUniversalCharter {
 
     /// @dev Emitted when a rule set is updated.
     event RuleSetUpdated(bytes[] newRuleSet, address updatedBy);
-
-    /// @dev Emitted when the contract is terminated.
-    event ContractTerminated(address terminatedBy);
 }
 
 ```
@@ -134,7 +136,7 @@ IUniversalCharter
 enum UserType { Human, Robot }:
 The UserType enum distinguishes between humans and robots in a gas-efficient manner, making it easier for contracts to handle different user types without the cost and errors associated with strings. This provides the basis for differentiated handling in future implementations, allowing the system to potentially apply different rules or logic based on whether the user is a human or a robot.
 
-registerUser(address user, UserType userType, bytes[] memory ruleSet):
+registerUser(UserType userType, bytes[] memory ruleSet):
 This function is critical for registering users, linking them to a specific rule set defined. It ensures that a user—whether human or robot—is bound to a particular set of rules upon joining the system.
 
 leaveSystem():
@@ -161,50 +163,43 @@ No backward compatibility issues found.
 ## Reference Implementation
 
 ```solidity
-
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "./IUniversalIdentity.sol";
-import "./IUniversalCharter.sol";
+import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { UniversalCharter } from "./UniversalCharter.sol";
 
-/// we can use owner to replace onlyTrustedUpdater
+// Interfaces
+import { IUniversalIdentity } from "./interface/IUniversalIdentity.sol";
+import { IUniversalCharter } from "./interface/IUniversalCharter.sol";
 
-contract UniversalIdentity is IUniversalIdentity {
+/// @title UniversalIdentity
+/// @notice The UniversalIdentity contract is used to manage the identity of robots.
 
-    // Mapping to store rules that the robot has agreed to follow
+contract UniversalIdentity is IUniversalIdentity, OwnableUpgradeable {
+    /// @notice Version identifier for the current implementation of the contract.
+    string public constant VERSION = "v0.0.1";
+
+    /// @notice Mapping to store rules that the robot has agreed to follow
     mapping(bytes => bool) private robotRules;
 
-    // Mapping to store the off-chain compliance status for each rule
+    /// @notice Mapping to store the off-chain compliance status for each rule
     mapping(bytes => bool) private complianceStatus;
 
-    // Track the charters the robot is subscribed to
-    mapping(address => bool) public subscribedCharters;
+    // @notice Track the charters the robot is subscribed to
+    mapping(address => bool) private subscribedCharters;
 
-    // Address of the trusted external system or oracle that will update compliance
-    address public trustedComplianceUpdater;
-
-    // Event for subscribing/unsubscribing to charters
-    event SubscribedToCharter(address indexed charter);
-    event UnsubscribedFromCharter(address indexed charter);
-
-    // Event for updating the compliance updater
-    event TrustedComplianceUpdaterChanged(address indexed oldUpdater, address indexed newUpdater);
-
-    // Custom errors to save gas on reverts
+    /// @notice Custom errors to save gas on reverts
     error RuleNotAgreed(bytes rule);
     error RuleNotCompliant(bytes rule);
     error RuleAlreadyAdded(bytes rule);
-    error NotSubscribedToCharter(address charter);
 
+    /// @dev Event to emit when compliance is checked
+    /// @param updater The address of the trusted compliance updater
+    /// @param rule The rule that was checked
+    event ComplianceChecked(address indexed updater, bytes rule);
 
-    // Modifier to restrict updates to the trusted external system
-    modifier onlyTrustedUpdater() {
-        require(msg.sender == trustedComplianceUpdater, "Not authorized: caller is not the trusted compliance updater");
-        _;
-    }
-
-    // Modifier to check if a rule exists
+    /// @notice Modifier to check if a rule exists
     modifier ruleExists(bytes memory rule) {
         require(robotRules[rule], "Rule does not exist");
         _;
@@ -212,33 +207,18 @@ contract UniversalIdentity is IUniversalIdentity {
 
     /// @notice Constructor to set the trusted compliance updater
     constructor() {
-        trustedComplianceUpdater = msg.sender;
+        initialize({ _owner: address(0xdEaD) });
     }
 
-    /// @notice Initializes the contract with the trusted compliance updater
-    function initialize(address _updater) external {
-        require(trustedComplianceUpdater == address(0), "Already initialized");
-        require(_updater != address(0), "Invalid updater address");
-
-        trustedComplianceUpdater = _updater;
-
-        emit TrustedComplianceUpdaterChanged(address(0), _updater);
-    }
-
-    /// @notice Sets the trusted compliance updater (restricted to the current updater)
-    /// @param _updater The address of the external system or oracle that will update compliance
-    function setTrustedComplianceUpdater(address _updater) external onlyTrustedUpdater {
-        require(_updater != address(0), "Invalid updater address");
-
-        address oldUpdater = trustedComplianceUpdater;  // Save old updater for the event
-        trustedComplianceUpdater = _updater;
-
-        emit TrustedComplianceUpdaterChanged(oldUpdater, _updater);
+    /// @dev Initializer function
+    function initialize(address _owner) public initializer {
+        __Ownable_init();
+        transferOwnership(_owner);
     }
 
     /// @notice Adds a rule to the robot's identity
     /// @param rule The dynamic byte array representing the rule that the robot agrees to follow.
-    function addRule(bytes memory rule) external override {
+    function addRule(bytes memory rule) external override onlyOwner {
         if (robotRules[rule]) {
             revert RuleAlreadyAdded(rule);
         }
@@ -251,21 +231,49 @@ contract UniversalIdentity is IUniversalIdentity {
 
     /// @notice Removes a rule from the robot's identity
     /// @param rule The dynamic byte array representing the rule that the robot no longer agrees to follow.
-    function removeRule(bytes memory rule) external override ruleExists(rule) {
-        // Remove rule from the mapping
-        delete robotRules[rule];  // Properly delete the rule
-        delete complianceStatus[rule]; // Ensure compliance status is also removed
+    function removeRule(bytes memory rule) external override onlyOwner ruleExists(rule) {
+        robotRules[rule] = false;
+        complianceStatus[rule] = false;
 
         emit RuleRemoved(rule);
     }
 
-    /// @notice Updates compliance status for a rule (called by the trusted external system)
+    /// @notice Subscribe and register to a specific UniversalCharter contract using its stored rule set
+    /// @param charter The address of the UniversalCharter contract
+    /// @param version The version of the rule set to fetch and register for
+    function subscribeAndRegisterToCharter(address charter, uint256 version) external {
+        require(!subscribedCharters[charter], "Already subscribed to this charter");
+        subscribedCharters[charter] = true;
+
+        // Fetch the rule set directly from the UniversalCharter contract using the public getter
+        bytes[] memory ruleSet = UniversalCharter(charter).getRuleSet(version);
+
+        // Register as a robot in the charter using the fetched rule set
+        UniversalCharter(charter).registerUser(IUniversalCharter.UserType.Robot, ruleSet);
+
+        emit SubscribedToCharter(charter);
+    }
+
+    /// @notice Leave the system for a specific UniversalCharter contract
+    /// @param charter The address of the UniversalCharter contract to leave
+    function leaveCharter(address charter) external {
+        require(subscribedCharters[charter], "Not subscribed to this charter");
+
+        // Call the leaveSystem function of the UniversalCharter contract
+        UniversalCharter(charter).leaveSystem();
+
+        // Unsubscribe from the charter after leaving
+        subscribedCharters[charter] = false;
+        emit UnsubscribedFromCharter(charter);
+    }
+
+    /// @notice Updates compliance status for a rule (called by the owner)
     /// @param rule The dynamic byte array representing the rule
     /// @param status The compliance status (true if compliant, false if not)
-    function updateCompliance(bytes memory rule, bool status) external onlyTrustedUpdater ruleExists(rule) {
+    function updateCompliance(bytes memory rule, bool status) external onlyOwner ruleExists(rule) {
         complianceStatus[rule] = status;
 
-        emit ComplianceChecked(msg.sender, rule);  // ComplianceChecked event needs to be declared
+        emit ComplianceChecked(msg.sender, rule); // ComplianceChecked event needs to be declared
     }
 
     /// @notice Checks if the robot has agreed to follow a specific rule and if it is compliant
@@ -276,87 +284,97 @@ contract UniversalIdentity is IUniversalIdentity {
             revert RuleNotAgreed(rule);
         }
 
-        if (!complianceStatus[rule]) {
-            revert RuleNotCompliant(rule);
-        }
-
         return true;
     }
 
-    /// @notice Subscribe and register to a specific UniversalCharter contract using its stored rule set
-    /// @param charter The address of the UniversalCharter contract
-    /// @param version The version of the rule set to fetch and register for
-    function subscribeAndRegisterToCharter(address charter, uint256 version) external {
-        require(!subscribedCharters[charter], "Already subscribed to this charter");
-        subscribedCharters[charter] = true;
-        emit SubscribedToCharter(charter);
-
-        // Fetch the rule set directly from the UniversalCharter contract using the public getter
-        bytes[] memory ruleSet = IUniversalCharter(charter).ruleSets(version);
-
-        // Register as a robot in the charter using the fetched rule set
-        IUniversalCharter(charter).registerUser(address(this), IUniversalCharter.UserType.Robot, ruleSet);
+    /// @notice Gets the compliance status of a rule
+    /// @param rule The rule to check.
+    function getRule(bytes memory rule) external view returns (bool) {
+        return robotRules[rule];
     }
 
-
-    /// @notice Leave the system for a specific UniversalCharter contract
-    /// @param charter The address of the UniversalCharter contract to leave
-    function leaveCharter(address charter) external {
-        require(subscribedCharters[charter], "Not subscribed to this charter");
-
-        // Call the leaveSystem function of the UniversalCharter contract
-        IUniversalCharter(charter).leaveSystem();
-
-        // Unsubscribe from the charter after leaving
-        subscribedCharters[charter] = false;
-        emit UnsubscribedFromCharter(charter);
+    /// @notice Gets the subscription status of a charter
+    /// @param charter The address of the charter to check.
+    function getSubscribedCharters(address charter) external view returns (bool) {
+        return subscribedCharters[charter];
     }
 
-    /// @dev Event to emit when compliance is checked
-    event ComplianceChecked(address indexed updater, bytes rule);
+    /// @notice Gets the compliance status of a rule
+    /// @param rule The rule to check.
+    function getComplianceStatus(bytes memory rule) external view returns (bool) {
+        return complianceStatus[rule];
+    }
 }
+```
 
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "./IUniversalCharter.sol";
-import "./IUniversalIdentity.sol";
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.20;
 
-/// Add owner and onlyOwner modifier
-/// Need an initialize function to set the owner
+import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import { SystemConfig } from "./SystemConfig.sol";
+
+// Interfaces
+import { IUniversalCharter } from "./interface/IUniversalCharter.sol";
+import { IUniversalIdentity } from "./interface/IUniversalIdentity.sol";
+
+/// @title UniversalCharter
+/// @notice The UniversalCharter contract is used to manage the registration and compliance of users.
 
 contract UniversalCharter is IUniversalCharter, OwnableUpgradeable {
-
-    // Struct to store information about a registered user
+    /// @notice Struct to store information about a registered user
     struct UserInfo {
         bool isRegistered;
         UserType userType;
-        uint256 ruleSetVersion;  // Rule set version the user is following
+        uint256 ruleSetVersion; // Rule set version the user is following
     }
 
-    // Mapping to store registered users
-    mapping(address => UserInfo) public users;
+    /// @notice Mapping to store registered users
+    mapping(address => UserInfo) private users;
 
-    // Mapping to store rule sets by version number
-    mapping(uint256 => bytes[]) public ruleSets;
+    /// @notice Mapping to store rule sets by version number
+    mapping(uint256 => bytes[]) private ruleSets;
 
-    // Mapping to track the rule set hash and its corresponding version
-    mapping(bytes32 => uint256) public ruleSetVersions;
-    
-    // Variable to track the current version of the rule set
-    uint256 public currentVersion;
+    /// @notice Mapping to track the rule set hash and its corresponding version
+    mapping(bytes32 => uint256) private ruleSetVersions;
+
+    /// @notice Version identifier for the current implementation of the contract.
+    string public constant VERSION = "v0.0.1";
+
+    /// @notice Variable to track the current version of the rule set
+    uint256 private currentVersion;
+
+    /// @notice Variable to store the address of the SystemConfig contract
+    SystemConfig public systemConfig;
+
+    /// @notice Error for when a method cannot be called when paused. This could be renamed
+    ///         to `Paused` in the future, but it collides with the `Paused` event.
+    error CallPaused();
+
+    /// @notice Reverts when paused.
+    modifier whenNotPaused() {
+        if (paused()) revert CallPaused();
+        _;
+    }
+
+    /// @notice Constucts the UniversalCharter contract.
+    constructor() {
+        initialize({ _owner: address(0xdEaD), _systemConfig: address(0xdEaD) });
+    }
 
     /// @dev Initializer function
-    function initialize() public initializer {
-        __Ownable_init(msg.sender); // Initialize ownership
-        currentVersion = 0; // Initialize versioning
+    function initialize(address _owner, address _systemConfig) public initializer {
+        __Ownable_init();
+        transferOwnership(_owner);
+        systemConfig = SystemConfig(_systemConfig);
     }
 
     /// @notice Registers a user (either human or robot) by agreeing to a rule set
-    /// @param user The address of the user joining the system (robot or human)
     /// @param userType The type of user: Human or Robot
     /// @param ruleSet The array of individual rules the user agrees to follow
-    function registerUser(address user, UserType userType, bytes[] memory ruleSet) external override {
-        require(!users[user].isRegistered, "User already registered");
-        
+    function registerUser(UserType userType, bytes[] memory ruleSet) external override whenNotPaused {
+        require(!users[msg.sender].isRegistered, "User already registered");
+
         // Hash the rule set to find the corresponding version
         bytes32 ruleSetHash = keccak256(abi.encode(ruleSet));
         uint256 version = ruleSetVersions[ruleSetHash];
@@ -364,21 +382,17 @@ contract UniversalCharter is IUniversalCharter, OwnableUpgradeable {
 
         // For robots, ensure compliance with each rule via the UniversalIdentity contract
         if (userType == UserType.Robot) {
-            _checkRobotCompliance(user, version);
+            require(_checkRobotCompliance(msg.sender, version), "Robot not compliant with rule set");
         }
 
         // Register the user with the versioned rule set
-        users[user] = UserInfo({
-            isRegistered: true,
-            userType: userType,
-            ruleSetVersion: version
-        });
+        users[msg.sender] = UserInfo({ isRegistered: true, userType: userType, ruleSetVersion: version });
 
-        emit UserRegistered(user, userType, ruleSet);
+        emit UserRegistered(msg.sender, userType, ruleSet);
     }
 
     /// @notice Allows a user (human or robot) to leave the system after passing compliance checks
-    function leaveSystem() external override {
+    function leaveSystem() external override whenNotPaused {
         require(users[msg.sender].isRegistered, "User not registered");
 
         UserInfo memory userInfo = users[msg.sender];
@@ -386,11 +400,10 @@ contract UniversalCharter is IUniversalCharter, OwnableUpgradeable {
         // For robots, verify compliance with all rules in the rule set
         uint256 version = userInfo.ruleSetVersion;
         if (userInfo.userType == UserType.Robot) {
-            _checkRobotCompliance(msg.sender, version);
+            require(_checkRobotCompliance(msg.sender, version), "Robot not compliant with rule set");
         }
 
-        // Unregister the user
-        delete users[msg.sender];
+        users[msg.sender] = UserInfo({ isRegistered: false, userType: UserType.Human, ruleSetVersion: 0 });
 
         emit UserLeft(msg.sender);
     }
@@ -431,13 +444,14 @@ contract UniversalCharter is IUniversalCharter, OwnableUpgradeable {
                 return false;
             }
         }
+
         return true;
     }
 
     /// @notice Updates or defines a new rule set version.
     /// @param newRuleSet The array of new individual rules.
     /// @dev This function SHOULD be restricted to authorized users (e.g., contract owner).
-    function updateRuleSet(bytes[] memory newRuleSet) external onlyOwner {
+    function updateRuleSet(bytes[] memory newRuleSet) external whenNotPaused onlyOwner {
         require(newRuleSet.length > 0, "Cannot update to an empty rule set");
 
         // Hash the new rule set and ensure it's not already registered
@@ -452,13 +466,33 @@ contract UniversalCharter is IUniversalCharter, OwnableUpgradeable {
         emit RuleSetUpdated(newRuleSet, msg.sender);
     }
 
-    /// @notice Terminates the contract, preventing any further interactions
-    function terminateContract() external onlyOwner {
-        emit ContractTerminated(msg.sender);
-        // Optionally add logic to block further interactions here
+    /// @notice Getter for the latest version of the rule set.
+    function getLatestRuleSetVersion() external view returns (uint256) {
+        return currentVersion;
+    }
+
+    /// @notice Get the rule set for a specific version.
+    /// @param version The version of the rule set to retrieve.
+    function getRuleSet(uint256 version) external view returns (bytes[] memory) {
+        return ruleSets[version];
+    }
+
+    /// @notice Get the version number for a specific rule set.
+    /// @param ruleSet The hash of the rule set to retrieve the version for.
+    function getRuleSetVersion(bytes32 ruleSet) external view returns (uint256) {
+        return ruleSetVersions[ruleSet];
+    }
+
+    function getUserInfo(address user) external view returns (UserInfo memory) {
+        return users[user];
+    }
+
+    /// @notice Getter for the current paused status.
+    /// @return paused_ Whether or not the contract is paused.
+    function paused() public view returns (bool paused_) {
+        paused_ = systemConfig.paused();
     }
 }
-
 ```
 
 ## Security Considerations
