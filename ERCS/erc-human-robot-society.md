@@ -186,7 +186,7 @@ contract UniversalIdentity is IUniversalIdentity, OwnableUpgradeable {
     /// @notice Mapping to store the off-chain compliance status for each rule
     mapping(bytes => bool) private complianceStatus;
 
-    // @notice Track the charters the robot is subscribed to
+    /// @notice Track the charters the robot is subscribed to
     mapping(address => bool) private subscribedCharters;
 
     /// @notice Custom errors to save gas on reverts
@@ -195,7 +195,7 @@ contract UniversalIdentity is IUniversalIdentity, OwnableUpgradeable {
     error RuleAlreadyAdded(bytes rule);
 
     /// @dev Event to emit when compliance is checked
-    /// @param updater The address of the trusted compliance updater
+    /// @param updater The address of the compliance updater (owner of the contract)
     /// @param rule The rule that was checked
     event ComplianceChecked(address indexed updater, bytes rule);
 
@@ -205,7 +205,7 @@ contract UniversalIdentity is IUniversalIdentity, OwnableUpgradeable {
         _;
     }
 
-    /// @notice Constructor to set the trusted compliance updater
+    /// @notice Constructor to set the owner
     constructor() {
         initialize({ _owner: address(0xdEaD) });
     }
@@ -273,7 +273,7 @@ contract UniversalIdentity is IUniversalIdentity, OwnableUpgradeable {
     function updateCompliance(bytes memory rule, bool status) external onlyOwner ruleExists(rule) {
         complianceStatus[rule] = status;
 
-        emit ComplianceChecked(msg.sender, rule); // ComplianceChecked event needs to be declared
+        emit ComplianceChecked(msg.sender, rule);
     }
 
     /// @notice Checks if the robot has agreed to follow a specific rule and if it is compliant
@@ -348,7 +348,7 @@ contract UniversalCharter is IUniversalCharter, OwnableUpgradeable {
     SystemConfig public systemConfig;
 
     /// @notice Error for when a method cannot be called when paused. This could be renamed
-    ///         to `Paused` in the future, but it collides with the `Paused` event.
+    /// to `Paused` in the future, but it collides with the `Paused` event.
     error CallPaused();
 
     /// @notice Reverts when paused.
@@ -497,13 +497,11 @@ contract UniversalCharter is IUniversalCharter, OwnableUpgradeable {
 
 ## Security Considerations
 
-Trusted Compliance Updater: The trustedComplianceUpdater role in UniversalIdentity is critical for updating compliance statuses. Access control for this role must be strictly enforced, potentially using a multisig setup or decentralized oracles to mitigate risks.
+Compliance Updater: The compliance updater role in the UniversalIdentity contract is critical for updating compliance statuses (currently limited to the owner). It is essential to ensure secure ownership to minimize the risks of unauthorized or malicious updates. 
 
-Rule Management: Functions like addRule, removeRule, and updateCompliance directly affect rule enforcement. It’s essential to ensure these functions are only callable by authorized users.
+Rule Management: Functions such as addRule, removeRule, and updateCompliance in the UniversalIdentity contract and updateRuleSet in the UniversalCharter contract directly affect rule enforcement. It’s essential to ensure these functions are only callable by authorized users.
 
 Upgradeable Contracts: The use of OwnableUpgradeable introduces risks during the initialization and upgrade process. Ensuring that the initialize function is protected against re-execution is critical to avoid reinitialization attacks.
-
-Off-Chain Oracle Dependency: Relying on off-chain systems for compliance updates introduces risks related to data integrity and availability. Using decentralized, audited oracles reduces the risk of malicious updates.
 
 Gas Consumption: Excessively large rule sets could lead to high gas costs or DoS risks. Consider setting limits on the number of rules allowed per rule set to maintain gas efficiency and avoid performance issues.
 
