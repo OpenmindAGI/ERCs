@@ -117,41 +117,41 @@ interface IUniversalCharter {
 
 ## Rationale
 
-IUniversalIdentity
+**IUniversalIdentity**
 
-addRule(bytes memory rule):
+`addRule(bytes memory rule)`
 This function allows a robot to add a specific rule to its identity, signaling its intention to comply with that rule. It supports dynamic rule management, enabling robots to flexibly adopt new compliance requirements as they join different systems.
 
-removeRule(bytes memory rule):
+`removeRule(bytes memory rule)`
 This function removes a rule from the robot’s identity, typically when the robot no longer needs to comply with that rule (e.g., leaving a system). It allows contracts to dynamically manage the robot’s obligations, ensuring its rule set remains accurate and up-to-date.
 
-checkCompliance(bytes memory rule):
+`checkCompliance(bytes memory rule)`
 This function checks whether the robot complies with a specific rule. It ensures that robots are adhering to rules before being granted permission to perform any actions
 
-Events (RuleAdded, RuleRemoved):
+`Events (RuleAdded, RuleRemoved)`
 These events provide transparency and traceability, making it easier to track compliance status.
 
-IUniversalCharter
+**IUniversalCharter**
 
-enum UserType { Human, Robot }:
+`enum UserType { Human, Robot }`
 The UserType enum distinguishes between humans and robots in a gas-efficient manner, making it easier for contracts to handle different user types without the cost and errors associated with strings. This provides the basis for differentiated handling in future implementations, allowing the system to potentially apply different rules or logic based on whether the user is a human or a robot.
 
-registerUser(UserType userType, bytes[] memory ruleSet):
+`registerUser(UserType userType, bytes[] memory ruleSet)`
 This function is critical for registering users, linking them to a specific rule set defined. It ensures that a user—whether human or robot—is bound to a particular set of rules upon joining the system.
 
-leaveSystem():
+`leaveSystem()`
 This function allows users to leave the system by de-registering themselves. The use of msg.sender ensures that only the user themselves can invoke this function, enhancing security. A compliance check is required (via checkCompliance) before the user is allowed to leave, ensuring that users fulfill all obligations before exiting the system.
 
-checkCompliance(address user, bytes[] memory ruleSet):
+`checkCompliance(address user, bytes[] memory ruleSet)`
 This function checks if a user is in compliance with a specific rule set they agreed to follow. It ensures that the system can efficiently manage and verify compliance against predefined rule sets, helping maintain the overall integrity of the system.
 
-updateRuleSet(bytes[] memory newRuleSet):
+`updateRuleSet(bytes[] memory newRuleSet)`
 This function enables the modification of rule sets in the contract, ensuring that the system can adapt over time. 
 
-terminateContract():
+`terminateContract()`
 This function allows for the permanent shutdown of the contract, preventing any further interactions or registrations within the system. 
 
-Events (UserRegistered, UserLeft, ComplianceChecked, RuleSetUpdated, ContractTerminated):
+`Events (UserRegistered, UserLeft, ComplianceChecked, RuleSetUpdated, ContractTerminated)`
 These events collectively ensure that key activities are visible to off-chain systems and participants, making the system auditable and transparent.
 
 ## Backwards Compatibility
